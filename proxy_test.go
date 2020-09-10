@@ -11,6 +11,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func StatusHandler(statusCode int, status string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			_, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "could not read body", http.StatusBadRequest)
+				return
+			}
+		}
+		http.Error(w, status, statusCode)
+	})
+}
+
 func TestStatusHandler(t *testing.T) {
 	for body, statusCode := range testdataStatusHandler {
 		t.Run(body, func(t *testing.T) {
@@ -100,9 +113,9 @@ func TestVerifySlackSignatureHandler(t *testing.T) {
 			tc := tc
 			// t.Parallel()
 			ts := httptest.NewServer(VerifySlackSignatureHandler(
+				tc.child,
 				tc.key,
 				tc.expire,
-				tc.child,
 			))
 			defer ts.Close()
 

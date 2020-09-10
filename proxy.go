@@ -4,31 +4,110 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"net/http/httputil"
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/alecthomas/kingpin.v2"
 )
 
-func main() {
+var (
+	httpAllowedMethods = kingpin.Flag("method", "methods to accept").
+				Envar("HTTP_METHOD").Default(http.MethodPost)
+	httpAllowedURIs = kingpin.Flag("uri", "uris to accept").
+			Envar("HTTP_URI")
+	httpReadTimeout = kingpin.Flag("read-timeout", "http timeout").
+			Envar("HTTP_READ_TIMEOUT").Default("1s")
+	httpMaxBytes = kingpin.Flag("read-limit", "max bytes to accept in body request").
+			Envar("HTTP_READ_LIMIT").Default("4mb")
+	httpWriteTimeout = kingpin.Flag("write-timeout", "http timeout").
+				Envar("HTTP_WRITE_TIMEOUT").Default("1s")
+	httpIdleTimeout = kingpin.Flag("idle-timeout", "http timeout (keepalive)").
+			Envar("HTTP_IDLE_TIMEOUT").Default("1s")
+	proxyTarget = kingpin.Flag("proxy-host", "proxy host for requests").
+			Required()
+	slackToken = kingpin.Flag("slack-token", "slack verification token").
+			Envar("SLACK_TOKEN").Required()
+	slackExpire = kingpin.Flag("slack-expire", "max age of slack timestamp").
+			Envar("SLACK_EXPIRE").Default("30s")
+)
+
+func launchHttpRedirect() {
+	srv := &http.Server{
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Connection", "close")
+			url := "https://" + req.Host + req.URL.String()
+			http.Redirect(w, req, url, http.StatusMovedPermanently)
+		}),
+	}
+	go func() {
+		for {
+			// just relaunch if port 80 crashes
+			log.Println(srv.ListenAndServe())
+		}
+	}()
+}
+
+func buildHandler() http.Handler {
+	h := httputil.NewSingleHostReverseProxy(*proxyTarget.URL())
+	return h
 
 }
 
-func StatusHandler(statusCode int, status string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil {
-			_, err := ioutil.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, "could not read body", http.StatusBadRequest)
-				return
-			}
-		}
-		http.Error(w, status, statusCode)
-	})
+func buildHttps(mux http.Handler) *http.Server {
+	tlsConfig := &tls.Config{
+		// Causes servers to use Go's default ciphersuite preferences,
+		// which are tuned to avoid attacks. Does nothing on clients.
+		PreferServerCipherSuites: true,
+		// Only use curves which have assembly implementations
+		CurvePreferences: []tls.CurveID{
+			tls.CurveP256,
+			tls.X25519, // Go 1.8 only
+		},
+		MinVersion: tls.VersionTLS13,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305, // Go 1.8 only
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,   // Go 1.8 only
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+
+			// Best disabled, as they don't provide Forward Secrecy,
+			// but might be necessary for some clients
+			// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+		},
+	}
+
+	return &http.Server{
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
+		TLSConfig:    tlsConfig,
+		Handler:      mux,
+	}
+}
+
+func main() {
+	kingpin.Parse()
+	launchHttpRedirect()
+
+	h := buildHandler()
+	srv := buildHttps(h)
+
+	srv.ListenAndServeTLS("", "")
+
 }
 
 func RestrictMethodHandler(child http.Handler, methods ...string) http.Handler {
@@ -43,10 +122,7 @@ func RestrictMethodHandler(child http.Handler, methods ...string) http.Handler {
 	})
 }
 
-func RestrictURIHandler(
-	child http.Handler,
-	uri ...string,
-) http.Handler {
+func RestrictURIHandler(child http.Handler, uri ...string) http.Handler {
 	for i := 0; i < len(uri); {
 		switch {
 
@@ -83,9 +159,7 @@ func RestrictURIHandler(
 
 type reader func(p []byte) (int, error)
 
-func (r reader) Read(p []byte) (int, error) {
-	return r(p)
-}
+func (r reader) Read(p []byte) (int, error) { return r(p) }
 
 func BodyLimitHandler(child http.Handler, maxSize int64) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,9 +206,9 @@ const (
 )
 
 func VerifySlackSignatureHandler(
-	key string,
-	expire time.Duration,
 	child http.Handler,
+	token string,
+	expire time.Duration,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// grab the timestamp on the request, and verify not stale
@@ -171,7 +245,7 @@ func VerifySlackSignatureHandler(
 		r.Body.Close()
 
 		// calculate the current checksum
-		mac := hmac.New(sha256.New, []byte(key))
+		mac := hmac.New(sha256.New, []byte(token))
 		// by spec mac.Write always returns nil
 		fmt.Fprintf(mac, "%s:%s:%s", SlackSignatureVersion, tsStr, string(newBody))
 
