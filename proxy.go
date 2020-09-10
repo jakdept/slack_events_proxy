@@ -46,11 +46,6 @@ func VerifySlackSignatureHandler(
 	child http.Handler,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			http.Error(w, "Only POST requests are accepted", 405)
-			return
-		}
-
 		// grab the timestamp on the request, and verify not stale
 		tsStr := r.Header.Get(SlackHeaderTimestamp)
 		tsInt, err := strconv.Atoi(tsStr)
