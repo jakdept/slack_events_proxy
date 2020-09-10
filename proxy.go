@@ -20,17 +20,17 @@ func StatusHandler(statusCode int, status string) http.Handler {
 }
 
 func RestrictMethodHandler(
-	denied, allowed http.Handler,
+	allowed, denied http.Handler,
 	methods ...string,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, eachMethod := range methods {
 			if r.Method == eachMethod {
 				allowed.ServeHTTP(w, r)
-			} else {
-				denied.ServeHTTP(w, r)
+				return
 			}
 		}
+		denied.ServeHTTP(w, r)
 	})
 }
 
@@ -38,26 +38,37 @@ func RestrictURIHandler(
 	allowed, denied http.Handler,
 	uri ...string,
 ) http.Handler {
+	for i := 0; i < len(uri); {
+		switch {
+
+		case len(uri[i]) < 1:
+			// remove empty URIs from list
+			uri = append(uri[:i], uri[i+1:]...)
+
+		case uri[i][:1] != "/":
+			// make sure each uri starts with /
+			uri[i] = "/" + uri[i]
+			i++
+
+		default:
+			i++
+		}
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for _, eachUri := range uri {
-			if len(eachUri) < 1 {
-				denied.ServeHTTP(w, r)
+		for _, eachURI := range uri {
+			if eachURI == r.RequestURI {
+				// exact matches
+				allowed.ServeHTTP(w, r)
+				return
+			} else if eachURI[len(eachURI)-1:] == "/" &&
+				strings.HasPrefix(r.RequestURI, eachURI) {
+				// prefix matches if the uri ends in /
+				allowed.ServeHTTP(w, r)
 				return
 			}
-
-			if eachUri[:1] != "/" {
-				eachUri = "/" + eachUri
-			}
-
-			if eachUri == r.RequestURI {
-				allowed.ServeHTTP(w, r)
-			} else if eachUri[len(eachUri)-1:] == "/" &&
-				strings.HasPrefix(r.RequestURI, eachUri) {
-				allowed.ServeHTTP(w, r)
-			} else {
-				denied.ServeHTTP(w, r)
-			}
 		}
+		denied.ServeHTTP(w, r)
 	})
 }
 

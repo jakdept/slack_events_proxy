@@ -12,7 +12,7 @@ import (
 )
 
 func TestStatusHandler(t *testing.T) {
-	for body, statusCode := range testdata_StatusHandler {
+	for body, statusCode := range testdataStatusHandler {
 		t.Run(body, func(t *testing.T) {
 			// t.Parallel()
 
@@ -26,7 +26,7 @@ func TestStatusHandler(t *testing.T) {
 			assert.Equal(t, statusCode, resp.StatusCode)
 			respBytes, err := ioutil.ReadAll(resp.Body)
 			assert.NoError(t, err)
-			assert.Equal(t, body, string(respBytes))
+			assert.Equal(t, body+"\n", string(respBytes))
 		})
 	}
 }
@@ -36,11 +36,11 @@ func TestResetrictMethodHandler(t *testing.T) {
 		StatusHandler(http.StatusOK, "ok"),
 		StatusHandler(http.StatusMethodNotAllowed, "not allowed"),
 		http.MethodGet,
-		http.MethodPut,
+		http.MethodPost,
 	))
 	defer ts.Close()
 
-	for method, statusCode := range testdata_RestrictURIHandler {
+	for method, statusCode := range testdataRestrictMethodHandler {
 		t.Run(method, func(t *testing.T) {
 			// t.Parallel()
 			req, err := http.NewRequest(method, ts.URL, nil)
@@ -52,8 +52,29 @@ func TestResetrictMethodHandler(t *testing.T) {
 	}
 }
 
+func TestRestrictURIHandler(t *testing.T) {
+	ts := httptest.NewServer(RestrictURIHandler(
+		StatusHandler(http.StatusNoContent, ""),
+		StatusHandler(http.StatusNotFound, "not found"),
+		"/allowed/specific",
+		"allowed/odd",
+		"",
+		"/allowed/generic/",
+	))
+	defer ts.Close()
+
+	for uri, statusCode := range testdataRestrictURIHandler {
+		t.Run("-"+uri, func(t *testing.T) {
+			// t.Parallel()
+			resp, err := ts.Client().Get(ts.URL + "/" + strings.TrimPrefix(uri, "/"))
+			require.NoError(t, err)
+			assert.Equal(t, statusCode, resp.StatusCode)
+		})
+	}
+}
+
 func TestVerifySlackSignatureHandler(t *testing.T) {
-	for name, tc := range testdata_VerifySlackSignature {
+	for name, tc := range testdataVerifySlackSignature {
 		t.Run(name, func(t *testing.T) {
 			tc := tc
 			// t.Parallel()
