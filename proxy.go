@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -12,6 +13,10 @@ import (
 	"strings"
 	"time"
 )
+
+func main() {
+
+}
 
 func StatusHandler(statusCode int, status string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,10 +96,21 @@ func BodyLimitHandler(child http.Handler, maxSize int64) http.Handler {
 		left := maxSize
 		in := r.Body
 
-		limited := reader(func(p []byte) (n int, err error) {
+		bodyTooLarge := errors.New("body over size limit")
+
+		defer func() {
+			p := recover()
+			if p != nil {
+				if pType, ok := p.(error); ok && pType == bodyTooLarge {
+					http.Error(w, "body over size limit", http.StatusRequestEntityTooLarge)
+					return
+				}
+			}
+		}()
+
+		limited := func(p []byte) (n int, err error) {
 			if left <= 0 {
-				http.Error(w, "body over size limit", http.StatusRequestEntityTooLarge)
-				panic(http.ErrAbortHandler) // abandon handlingthis request
+				panic(bodyTooLarge) // abandon handlingthis request
 			}
 			if int64(len(p)) > left {
 				p = p[0:left]
@@ -102,8 +118,8 @@ func BodyLimitHandler(child http.Handler, maxSize int64) http.Handler {
 			n, err = in.Read(p)
 			left -= int64(n)
 			return
-		})
-		r.Body = ioutil.NopCloser(limited)
+		}
+		r.Body = ioutil.NopCloser(reader(limited))
 
 		child.ServeHTTP(w, r)
 	})

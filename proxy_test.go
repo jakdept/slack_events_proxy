@@ -76,19 +76,20 @@ func TestBodyLimitHandler(t *testing.T) {
 		StatusHandler(http.StatusNoContent, ""), 64))
 	defer ts.Close()
 
-	justFine := "this is just fine"
-	tooLong := `
-	this is too long this is too long this is too long this is too long
-	this is too long this is too long this is too long this is too long
-	this is too long this is too long this is too long this is too long
-	this is too long this is too long this is too long this is too long
-	`
-
-	resp, err := http.Post(ts.URL, "text/text", strings.NewReader(justFine))
+	resp, err := http.Post(ts.URL, "text/text",
+		strings.NewReader("this is just fine"))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 
-	resp, err = http.Post(ts.URL, "text/text", strings.NewReader(tooLong))
+	resp, err = http.Post(ts.URL, "text/text",
+		strings.NewReader(strings.Repeat("this is too long ", 1<<10)))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+
+	unlimited := func(p []byte) (int, error) {
+		return copy(p, []byte(strings.Repeat("this is unlimited ", 1<<20))), nil
+	}
+	resp, err = http.Post(ts.URL, "text/text", reader(unlimited))
 	require.NoError(t, err)
 	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
 }
