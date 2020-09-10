@@ -13,6 +13,27 @@ import (
 	"time"
 )
 
+func StatusHandler(statusCode int, status string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, status, statusCode)
+	})
+}
+
+func RestrictMethodHandler(
+	allowedMethods []string,
+	denied, allowed http.Handler,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, method := range allowedMethods {
+			if r.Method == method {
+				allowed.ServeHTTP(w, r)
+			} else {
+				denied.ServeHTTP(w, r)
+			}
+		}
+	})
+}
+
 const (
 	SlackSignatureVersion = "v0"
 	SlackHeaderSignature  = "X-Slack-Signature"

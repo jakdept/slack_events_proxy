@@ -10,12 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func httpStatusHandler(statusCode int, status string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, status, statusCode)
-	})
-}
-
 func TestVerifySlackSignatureHandler(t *testing.T) {
 	for name, tc := range testdata_VerifySlackSignature {
 		t.Run(name, func(t *testing.T) {
@@ -30,7 +24,7 @@ func TestVerifySlackSignatureHandler(t *testing.T) {
 			for testReqID, testReq := range tc.requests {
 				testReq := testReq
 				eachReq, err := http.NewRequest(
-					testReq.Method,
+					http.MethodGet,
 					ts.URL,
 					strings.NewReader(testReq.Body))
 				require.NoError(t, err, "req %d", testReqID)
