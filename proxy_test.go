@@ -14,6 +14,8 @@ import (
 func TestStatusHandler(t *testing.T) {
 	for body, statusCode := range testdata_StatusHandler {
 		t.Run(body, func(t *testing.T) {
+			// t.Parallel()
+
 			body, statusCode := body, statusCode
 			ts := httptest.NewServer(StatusHandler(statusCode, body))
 			defer ts.Close()
@@ -25,6 +27,27 @@ func TestStatusHandler(t *testing.T) {
 			respBytes, err := ioutil.ReadAll(resp.Body)
 			assert.NoError(t, err)
 			assert.Equal(t, body, string(respBytes))
+		})
+	}
+}
+
+func TestResetrictMethodHandler(t *testing.T) {
+	ts := httptest.NewServer(RestrictMethodHandler(
+		StatusHandler(http.StatusOK, "ok"),
+		StatusHandler(http.StatusMethodNotAllowed, "not allowed"),
+		http.MethodGet,
+		http.MethodPut,
+	))
+	defer ts.Close()
+
+	for method, statusCode := range testdata_RestrictURIHandler {
+		t.Run(method, func(t *testing.T) {
+			// t.Parallel()
+			req, err := http.NewRequest(method, ts.URL, nil)
+			require.NoError(t, err)
+			resp, err := ts.Client().Do(req)
+			require.NoError(t, err)
+			assert.Equal(t, statusCode, resp.StatusCode)
 		})
 	}
 }

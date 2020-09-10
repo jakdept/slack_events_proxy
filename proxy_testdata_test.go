@@ -13,6 +13,13 @@ var testdata_StatusHandler = map[string]int{
 	"server error":  http.StatusInternalServerError,
 }
 
+var testdata_RestrictURIHandler = map[string]int{
+	http.MethodGet:    http.StatusOK,
+	http.MethodPost:   http.StatusOK,
+	http.MethodDelete: http.StatusMethodNotAllowed,
+	http.MethodPut:    http.StatusMethodNotAllowed,
+}
+
 type testdata_VerifySlackSignature_Request struct {
 	Body       string
 	Timestamp  string

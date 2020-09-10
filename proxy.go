@@ -19,7 +19,22 @@ func StatusHandler(statusCode int, status string) http.Handler {
 	})
 }
 
-func AllowedURIHandler(
+func RestrictMethodHandler(
+	denied, allowed http.Handler,
+	methods ...string,
+) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, eachMethod := range methods {
+			if r.Method == eachMethod {
+				allowed.ServeHTTP(w, r)
+			} else {
+				denied.ServeHTTP(w, r)
+			}
+		}
+	})
+}
+
+func RestrictURIHandler(
 	allowed, denied http.Handler,
 	uri ...string,
 ) http.Handler {
@@ -38,21 +53,6 @@ func AllowedURIHandler(
 				allowed.ServeHTTP(w, r)
 			} else if eachUri[len(eachUri)-1:] == "/" &&
 				strings.HasPrefix(r.RequestURI, eachUri) {
-				allowed.ServeHTTP(w, r)
-			} else {
-				denied.ServeHTTP(w, r)
-			}
-		}
-	})
-}
-
-func RestrictMethodHandler(
-	denied, allowed http.Handler,
-	methods ...string,
-) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for _, eachMethod := range methods {
-			if r.Method == eachMethod {
 				allowed.ServeHTTP(w, r)
 			} else {
 				denied.ServeHTTP(w, r)
