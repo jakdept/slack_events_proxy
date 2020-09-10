@@ -15,15 +15,18 @@ import (
 
 func StatusHandler(statusCode int, status string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			_, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "could not read body", http.StatusBadRequest)
+				return
+			}
+		}
 		http.Error(w, status, statusCode)
 	})
 }
 
-
-func RestrictMethodHandler(
-	child http.Handler,
-	methods ...string,
-) http.Handler {
+func RestrictMethodHandler(child http.Handler, methods ...string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, eachMethod := range methods {
 			if r.Method == eachMethod {
@@ -70,6 +73,39 @@ func RestrictURIHandler(
 			}
 		}
 		http.Error(w, "uri not found", http.StatusNotFound)
+	})
+}
+
+type reader func(p []byte) (int, error)
+
+func (r reader) Read(p []byte) (int, error) {
+	return r(p)
+}
+
+func BodyLimitHandler(child http.Handler, maxSize int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ContentLength > maxSize {
+			http.Error(w, "body over size limit", http.StatusRequestEntityTooLarge)
+			return
+		}
+		left := maxSize
+		in := r.Body
+
+		limited := reader(func(p []byte) (n int, err error) {
+			if left <= 0 {
+				http.Error(w, "body over size limit", http.StatusRequestEntityTooLarge)
+				panic(http.ErrAbortHandler) // abandon handlingthis request
+			}
+			if int64(len(p)) > left {
+				p = p[0:left]
+			}
+			n, err = in.Read(p)
+			left -= int64(n)
+			return
+		})
+		r.Body = ioutil.NopCloser(limited)
+
+		child.ServeHTTP(w, r)
 	})
 }
 

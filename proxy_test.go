@@ -71,6 +71,28 @@ func TestRestrictURIHandler(t *testing.T) {
 	}
 }
 
+func TestBodyLimitHandler(t *testing.T) {
+	ts := httptest.NewServer(BodyLimitHandler(
+		StatusHandler(http.StatusNoContent, ""), 64))
+	defer ts.Close()
+
+	justFine := "this is just fine"
+	tooLong := `
+	this is too long this is too long this is too long this is too long
+	this is too long this is too long this is too long this is too long
+	this is too long this is too long this is too long this is too long
+	this is too long this is too long this is too long this is too long
+	`
+
+	resp, err := http.Post(ts.URL, "text/text", strings.NewReader(justFine))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+	resp, err = http.Post(ts.URL, "text/text", strings.NewReader(tooLong))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+}
+
 func TestVerifySlackSignatureHandler(t *testing.T) {
 	for name, tc := range testdataVerifySlackSignature {
 		t.Run(name, func(t *testing.T) {
