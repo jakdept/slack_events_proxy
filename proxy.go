@@ -19,23 +19,24 @@ func StatusHandler(statusCode int, status string) http.Handler {
 	})
 }
 
+
 func RestrictMethodHandler(
-	allowed, denied http.Handler,
+	child http.Handler,
 	methods ...string,
 ) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, eachMethod := range methods {
 			if r.Method == eachMethod {
-				allowed.ServeHTTP(w, r)
+				child.ServeHTTP(w, r)
 				return
 			}
 		}
-		denied.ServeHTTP(w, r)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
 }
 
 func RestrictURIHandler(
-	allowed, denied http.Handler,
+	child http.Handler,
 	uri ...string,
 ) http.Handler {
 	for i := 0; i < len(uri); {
@@ -59,16 +60,16 @@ func RestrictURIHandler(
 		for _, eachURI := range uri {
 			if eachURI == r.RequestURI {
 				// exact matches
-				allowed.ServeHTTP(w, r)
+				child.ServeHTTP(w, r)
 				return
 			} else if eachURI[len(eachURI)-1:] == "/" &&
 				strings.HasPrefix(r.RequestURI, eachURI) {
 				// prefix matches if the uri ends in /
-				allowed.ServeHTTP(w, r)
+				child.ServeHTTP(w, r)
 				return
 			}
 		}
-		denied.ServeHTTP(w, r)
+		http.Error(w, "uri not found", http.StatusNotFound)
 	})
 }
 

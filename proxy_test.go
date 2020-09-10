@@ -34,7 +34,6 @@ func TestStatusHandler(t *testing.T) {
 func TestResetrictMethodHandler(t *testing.T) {
 	ts := httptest.NewServer(RestrictMethodHandler(
 		StatusHandler(http.StatusOK, "ok"),
-		StatusHandler(http.StatusMethodNotAllowed, "not allowed"),
 		http.MethodGet,
 		http.MethodPost,
 	))
@@ -55,7 +54,6 @@ func TestResetrictMethodHandler(t *testing.T) {
 func TestRestrictURIHandler(t *testing.T) {
 	ts := httptest.NewServer(RestrictURIHandler(
 		StatusHandler(http.StatusNoContent, ""),
-		StatusHandler(http.StatusNotFound, "not found"),
 		"/allowed/specific",
 		"allowed/odd",
 		"",
