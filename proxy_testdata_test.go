@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+var testdata_StatusHandler = map[string]int{
+	"no content":    http.StatusNoContent,
+	"StatusOK":      http.StatusOK,
+	"access aenied": http.StatusUnauthorized,
+	"not found":     http.StatusNotFound,
+	"server error":  http.StatusInternalServerError,
+}
+
 type testdata_VerifySlackSignature_Request struct {
 	Body       string
 	Timestamp  string
