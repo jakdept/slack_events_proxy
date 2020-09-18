@@ -46,13 +46,13 @@ var (
 	// server timeouts
 	httpReadTimeout = kingpin.
 			Flag("read-timeout", "http timeout").
-			Envar("HTTP_READ_TIMEOUT").Default("1s")
+			Envar("HTTP_READ_TIMEOUT").Default("10s")
 	httpWriteTimeout = kingpin.
 				Flag("write-timeout", "http timeout").
-				Envar("HTTP_WRITE_TIMEOUT").Default("1s")
+				Envar("HTTP_WRITE_TIMEOUT").Default("10s")
 	httpIdleTimeout = kingpin.
 			Flag("idle-timeout", "http timeout (keepalive)").
-			Envar("HTTP_IDLE_TIMEOUT").Default("1s")
+			Envar("HTTP_IDLE_TIMEOUT").Default("120s")
 
 	httpListen = kingpin.
 			Flag("http-listen", "listen address for http server (no tls)").
@@ -69,40 +69,32 @@ var (
 			Default("false")
 )
 
-func httpRedirectSrv(listen string) (srv *http.Server) {
-	srv.ReadTimeout = 5 * time.Second
-	srv.WriteTimeout = 5 * time.Second
+func buildSrv(listen string) (srv *http.Server) {
+	srv.ReadTimeout = *httpReadTimeout.Duration()
+	srv.WriteTimeout = *httpWriteTimeout.Duration()
+	srv.IdleTimeout = *httpIdleTimeout.Duration()
+	return
+}
+
+func httpRedirectSrv(listen string) *http.Server {
+	srv := buildSrv(listen)
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Connection", "close")
 		url := "https://" + req.Host + req.URL.String()
 		http.Redirect(w, req, url, http.StatusMovedPermanently)
 	})
-	return
+	return srv
 }
 
-// func httpSrv(listen string) (srv *http.Server) {
-
-// }
-
-func buildHandler() (h http.Handler) {
-	h = httputil.NewSingleHostReverseProxy(*proxyTarget.URL())
-	h = VerifySlackSignatureHandler(h, *slackToken.String(), *slackExpire.Duration())
-
-	if len(*httpAllowedMethods.String()) > 0 {
-		h = RestrictMethodHandler(h, *httpAllowedMethods.Strings()...)
-	}
-	if len(*httpAllowedURIs.String()) > 0 {
-		h = RestrictMethodHandler(h, *httpAllowedURIs.Strings()...)
-	}
-
-	if *httpMaxBytes.Int64() > 0 {
-		h = BodyLimitHandler(h, *httpMaxBytes.Int64())
-	}
-	return
+func httpProxySrv(listen string) *http.Server {
+	srv := buildSrv(listen)
+	h := buildHandler()
+	srv.Handler = h
+	return srv
 }
 
-func buildHttps(mux http.Handler) *http.Server {
-	tlsConfig := &tls.Config{
+func setupTls(srv *http.Server) {
+	srv.TLSConfig = &tls.Config{
 		// Causes servers to use Go's default ciphersuite preferences,
 		// which are tuned to avoid attacks. Does nothing on clients.
 		PreferServerCipherSuites: true,
@@ -126,12 +118,31 @@ func buildHttps(mux http.Handler) *http.Server {
 			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
 		},
 	}
+}
+
+func buildHandler() (h http.Handler) {
+	h = httputil.NewSingleHostReverseProxy(*proxyTarget.URL())
+	h = VerifySlackSignatureHandler(h, *slackToken.String(), *slackExpire.Duration())
+
+	if len(*httpAllowedMethods.String()) > 0 {
+		h = RestrictMethodHandler(h, *httpAllowedMethods.Strings()...)
+	}
+	if len(*httpAllowedURIs.String()) > 0 {
+		h = RestrictMethodHandler(h, *httpAllowedURIs.Strings()...)
+	}
+
+	if *httpMaxBytes.Int64() > 0 {
+		h = BodyLimitHandler(h, *httpMaxBytes.Int64())
+	}
+	return
+}
+
+func buildHttps(mux http.Handler) *http.Server {
 
 	return &http.Server{
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  120 * time.Second,
-		TLSConfig:    tlsConfig,
 		Handler:      mux,
 	}
 }
