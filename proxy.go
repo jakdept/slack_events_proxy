@@ -9,59 +9,96 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
 	"strings"
 	"time"
 
-	"gopkg.in/alecthomas/kingpin.v2"
+	"github.com/alecthomas/kingpin"
 )
+
+var httpAllowedMethodsSet, httpAllowedURIsSet *bool
 
 var (
-	httpAllowedMethods = kingpin.Flag("method", "methods to accept").
-				Envar("HTTP_METHOD").Default(http.MethodPost)
-	httpAllowedURIs = kingpin.Flag("uri", "uris to accept").
-			Envar("HTTP_URI")
-	httpReadTimeout = kingpin.Flag("read-timeout", "http timeout").
-			Envar("HTTP_READ_TIMEOUT").Default("1s")
-	httpMaxBytes = kingpin.Flag("read-limit", "max bytes to accept in body request").
-			Envar("HTTP_READ_LIMIT").Default("4mb")
-	httpWriteTimeout = kingpin.Flag("write-timeout", "http timeout").
-				Envar("HTTP_WRITE_TIMEOUT").Default("1s")
-	httpIdleTimeout = kingpin.Flag("idle-timeout", "http timeout (keepalive)").
-			Envar("HTTP_IDLE_TIMEOUT").Default("1s")
-	proxyTarget = kingpin.Flag("proxy-host", "proxy host for requests").
+	// required restrictions
+	proxyTarget = kingpin.
+			Flag("proxy-host", "proxy host for requests").
 			Required()
-	slackToken = kingpin.Flag("slack-token", "slack verification token").
+	slackToken = kingpin.
+			Flag("slack-token", "slack verification token").
 			Envar("SLACK_TOKEN").Required()
-	slackExpire = kingpin.Flag("slack-expire", "max age of slack timestamp").
+	slackExpire = kingpin.
+			Flag("slack-expire", "max age of slack timestamp").
 			Envar("SLACK_EXPIRE").Default("30s")
+
+	// handler restrictions
+	httpAllowedMethods = kingpin.
+				Flag("method", "methods to accept").
+				Envar("HTTP_METHOD").Default(http.MethodPost)
+	httpAllowedURIs = kingpin.
+			Flag("uri", "uris to accept").
+			Envar("HTTP_URI")
+	httpMaxBytes = kingpin.
+			Flag("read-limit", "max bytes to accept in body request").
+			Envar("HTTP_READ_LIMIT").Default("4mb")
+
+	// server timeouts
+	httpReadTimeout = kingpin.
+			Flag("read-timeout", "http timeout").
+			Envar("HTTP_READ_TIMEOUT").Default("1s")
+	httpWriteTimeout = kingpin.
+				Flag("write-timeout", "http timeout").
+				Envar("HTTP_WRITE_TIMEOUT").Default("1s")
+	httpIdleTimeout = kingpin.
+			Flag("idle-timeout", "http timeout (keepalive)").
+			Envar("HTTP_IDLE_TIMEOUT").Default("1s")
+
+	httpListen = kingpin.
+			Flag("http-listen", "listen address for http server (no tls)").
+			Envar("HTTP_LISTEN")
+	httpsListen = kingpin.
+			Flag("https-listen", "listen address for https server (w/tls)").
+			Envar("HTTPS_LISTEN")
+	httpRedirect = kingpin.
+			Flag("http-redirect", "redirect http to https?").Default("true")
+	mutualTLS = kingpin.
+			Flag("mtls", "enable mtls on https-listen").Default("false")
+	autocert = kingpin.
+			Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
+			Default("false")
 )
 
-func launchHttpRedirect() {
-	srv := &http.Server{
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
-		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			w.Header().Set("Connection", "close")
-			url := "https://" + req.Host + req.URL.String()
-			http.Redirect(w, req, url, http.StatusMovedPermanently)
-		}),
-	}
-	go func() {
-		for {
-			// just relaunch if port 80 crashes
-			log.Println(srv.ListenAndServe())
-		}
-	}()
+func httpRedirectSrv(listen string) (srv *http.Server) {
+	srv.ReadTimeout = 5 * time.Second
+	srv.WriteTimeout = 5 * time.Second
+	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Connection", "close")
+		url := "https://" + req.Host + req.URL.String()
+		http.Redirect(w, req, url, http.StatusMovedPermanently)
+	})
+	return
 }
 
-func buildHandler() http.Handler {
-	h := httputil.NewSingleHostReverseProxy(*proxyTarget.URL())
-	return h
+// func httpSrv(listen string) (srv *http.Server) {
 
+// }
+
+func buildHandler() (h http.Handler) {
+	h = httputil.NewSingleHostReverseProxy(*proxyTarget.URL())
+	h = VerifySlackSignatureHandler(h, *slackToken.String(), *slackExpire.Duration())
+
+	if len(*httpAllowedMethods.String()) > 0 {
+		h = RestrictMethodHandler(h, *httpAllowedMethods.Strings()...)
+	}
+	if len(*httpAllowedURIs.String()) > 0 {
+		h = RestrictMethodHandler(h, *httpAllowedURIs.Strings()...)
+	}
+
+	if *httpMaxBytes.Int64() > 0 {
+		h = BodyLimitHandler(h, *httpMaxBytes.Int64())
+	}
+	return
 }
 
 func buildHttps(mux http.Handler) *http.Server {
@@ -101,7 +138,6 @@ func buildHttps(mux http.Handler) *http.Server {
 
 func main() {
 	kingpin.Parse()
-	launchHttpRedirect()
 
 	h := buildHandler()
 	srv := buildHttps(h)
