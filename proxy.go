@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -54,47 +55,79 @@ var (
 			Flag("idle-timeout", "http timeout (keepalive)").
 			Envar("HTTP_IDLE_TIMEOUT").Default("120s")
 
-	httpListen = kingpin.
-			Flag("http-listen", "listen address for http server (no tls)").
-			Envar("HTTP_LISTEN")
-	httpsListen = kingpin.
-			Flag("https-listen", "listen address for https server (w/tls)").
-			Envar("HTTPS_LISTEN")
-	httpRedirect = kingpin.
-			Flag("http-redirect", "redirect http to https?").Default("true")
+	listen = kingpin.
+		Flag("listen", "listen address both servers (multiple allowed)").
+		Envar("LISTEN")
 	mutualTLS = kingpin.
 			Flag("mtls", "enable mtls on https-listen").Default("false")
+	redirectTarget = kingpin.
+			Flag("redirect-target", "target for http -> https redirect")
 	autocert = kingpin.
 			Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
 			Default("false")
 )
 
-func buildSrv(listen string) (srv *http.Server) {
+func openListeners(addrs []net.TCPAddr) (listeners []net.Listener, err error) {
+	for _, addr := range *listen.TCPList() {
+		if each, err := net.Listen(addr.Network(), addr.String()); err != nil {
+			return nil, err
+		} else {
+			listeners = append(listeners, each)
+		}
+	}
+
+	if len(listeners) < 1 {
+		if each, err := net.Listen("tcp", ":http"); err != nil { //nolint
+			return nil, err
+		} else {
+			listeners = append(listeners, each)
+		}
+	}
+	return
+}
+
+func buildSrv() (srv *http.Server) {
 	srv.ReadTimeout = *httpReadTimeout.Duration()
 	srv.WriteTimeout = *httpWriteTimeout.Duration()
 	srv.IdleTimeout = *httpIdleTimeout.Duration()
 	return
 }
 
-func httpRedirectSrv(listen string) *http.Server {
-	srv := buildSrv(listen)
+func httpRedirectSrv() *http.Server {
+	srv := buildSrv()
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Connection", "close")
-		url := "https://" + req.Host + req.URL.String()
-		http.Redirect(w, req, url, http.StatusMovedPermanently)
+		http.Redirect(w, req, *redirectTarget.String()+req.URL.String(), http.StatusMovedPermanently)
 	})
 	return srv
 }
 
-func httpProxySrv(listen string) *http.Server {
-	srv := buildSrv(listen)
+func httpProxySrv() *http.Server {
+	srv := buildSrv()
 	h := buildHandler()
 	srv.Handler = h
 	return srv
 }
 
-func setupTls(srv *http.Server) {
-	srv.TLSConfig = &tls.Config{
+func buildHandler() (h http.Handler) {
+	h = httputil.NewSingleHostReverseProxy(*proxyTarget.URL())
+	h = VerifySlackSignatureHandler(h, *slackToken.String(), *slackExpire.Duration())
+
+	if len(*httpAllowedMethods.String()) > 0 {
+		h = RestrictMethodHandler(h, *httpAllowedMethods.Strings()...)
+	}
+	if len(*httpAllowedURIs.String()) > 0 {
+		h = RestrictMethodHandler(h, *httpAllowedURIs.Strings()...)
+	}
+
+	if *httpMaxBytes.Int64() > 0 {
+		h = BodyLimitHandler(h, *httpMaxBytes.Int64())
+	}
+	return
+}
+
+func tlsConfig() *tls.Config {
+	return &tls.Config{
 		// Causes servers to use Go's default ciphersuite preferences,
 		// which are tuned to avoid attacks. Does nothing on clients.
 		PreferServerCipherSuites: true,
@@ -118,23 +151,6 @@ func setupTls(srv *http.Server) {
 			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
 		},
 	}
-}
-
-func buildHandler() (h http.Handler) {
-	h = httputil.NewSingleHostReverseProxy(*proxyTarget.URL())
-	h = VerifySlackSignatureHandler(h, *slackToken.String(), *slackExpire.Duration())
-
-	if len(*httpAllowedMethods.String()) > 0 {
-		h = RestrictMethodHandler(h, *httpAllowedMethods.Strings()...)
-	}
-	if len(*httpAllowedURIs.String()) > 0 {
-		h = RestrictMethodHandler(h, *httpAllowedURIs.Strings()...)
-	}
-
-	if *httpMaxBytes.Int64() > 0 {
-		h = BodyLimitHandler(h, *httpMaxBytes.Int64())
-	}
-	return
 }
 
 func buildHttps(mux http.Handler) *http.Server {
