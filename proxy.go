@@ -93,23 +93,14 @@ func buildSrv() (srv *http.Server) {
 	return
 }
 
-func httpRedirectSrv() *http.Server {
-	srv := buildSrv()
-	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+func handlerRedirect() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Connection", "close")
 		http.Redirect(w, req, *redirectTarget.String()+req.URL.String(), http.StatusMovedPermanently)
 	})
-	return srv
 }
 
-func httpProxySrv() *http.Server {
-	srv := buildSrv()
-	h := buildHandler()
-	srv.Handler = h
-	return srv
-}
-
-func buildHandler() (h http.Handler) {
+func handlerProxy() (h http.Handler) {
 	h = httputil.NewSingleHostReverseProxy(*proxyTarget.URL())
 	h = VerifySlackSignatureHandler(h, *slackToken.String(), *slackExpire.Duration())
 
@@ -124,6 +115,13 @@ func buildHandler() (h http.Handler) {
 		h = BodyLimitHandler(h, *httpMaxBytes.Int64())
 	}
 	return
+}
+
+func httpProxySrv() *http.Server {
+	srv := buildSrv()
+	h := handlerProxy()
+	srv.Handler = h
+	return srv
 }
 
 func tlsConfig() *tls.Config {
@@ -153,23 +151,8 @@ func tlsConfig() *tls.Config {
 	}
 }
 
-func buildHttps(mux http.Handler) *http.Server {
-
-	return &http.Server{
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
-		Handler:      mux,
-	}
-}
-
 func main() {
 	kingpin.Parse()
-
-	h := buildHandler()
-	srv := buildHttps(h)
-
-	srv.ListenAndServeTLS("", "")
 
 }
 
