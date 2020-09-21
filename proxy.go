@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -23,105 +24,96 @@ var httpAllowedMethodsSet, httpAllowedURIsSet *bool
 
 var (
 	// required restrictions
-	proxyTarget = kingpin.
+	flagProxyTarget = kingpin.
 			Flag("proxy-host", "proxy host for requests").
 			Required()
-	slackToken = kingpin.
+	flagSlackToken = kingpin.
 			Flag("slack-token", "slack verification token").
 			Envar("SLACK_TOKEN").Required()
-	slackExpire = kingpin.
+	flagSlackExpire = kingpin.
 			Flag("slack-expire", "max age of slack timestamp").
 			Envar("SLACK_EXPIRE").Default("30s")
 
 	// handler restrictions
-	httpAllowedMethods = kingpin.
+	flagHttpAllowedMethods = kingpin.
 				Flag("method", "methods to accept").
 				Envar("HTTP_METHOD").Default(http.MethodPost)
-	httpAllowedURIs = kingpin.
-			Flag("uri", "uris to accept").
-			Envar("HTTP_URI")
-	httpMaxBytes = kingpin.
-			Flag("read-limit", "max bytes to accept in body request").
-			Envar("HTTP_READ_LIMIT").Default("4mb")
+	flagHttpAllowedURIs = kingpin.
+				Flag("uri", "uris to accept").
+				Envar("HTTP_URI")
+	flagHttpMaxBytes = kingpin.
+				Flag("read-limit", "max bytes to accept in body request").
+				Envar("HTTP_READ_LIMIT").Default("4mb")
 
 	// server timeouts
-	httpReadTimeout = kingpin.
-			Flag("read-timeout", "http timeout").
-			Envar("HTTP_READ_TIMEOUT").Default("10s")
-	httpWriteTimeout = kingpin.
+	flagHttpReadTimeout = kingpin.
+				Flag("read-timeout", "http timeout").
+				Envar("HTTP_READ_TIMEOUT").Default("10s")
+	flagHttpWriteTimeout = kingpin.
 				Flag("write-timeout", "http timeout").
 				Envar("HTTP_WRITE_TIMEOUT").Default("10s")
-	httpIdleTimeout = kingpin.
-			Flag("idle-timeout", "http timeout (keepalive)").
-			Envar("HTTP_IDLE_TIMEOUT").Default("120s")
+	flagHttpIdleTimeout = kingpin.
+				Flag("idle-timeout", "http timeout (keepalive)").
+				Envar("HTTP_IDLE_TIMEOUT").Default("120s")
 
-	listen = kingpin.
-		Flag("listen", "listen address both servers (multiple allowed)").
-		Envar("LISTEN")
-	mutualTLS = kingpin.
+	flagListen = kingpin.
+			Flag("listen", "listen address both servers (multiple allowed)").
+			Envar("LISTEN").Required()
+	flagMutualTLS = kingpin.
 			Flag("mtls", "enable mtls on https-listen").Default("false")
-	redirectTarget = kingpin.
-			Flag("redirect-target", "target for http -> https redirect")
-	autocert = kingpin.
+	flagTLSRedirect = kingpin.
+			Flag("redirect-target", "target for http -> https redirect").
+			Default("true")
+	flagTLSCert = kingpin.
+			Flag("tlsCert", "path to tls cert for https server").
+			ExistingFile()
+	flagTLSKey = kingpin.
+			Flag("tlsKey", "path to tls key for https server").
+			ExistingFile()
+	flagAutocert = kingpin.
 			Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
 			Default("false")
 )
 
-func openListeners(addrs []net.TCPAddr) (listeners []net.Listener, err error) {
-	for _, addr := range *listen.TCPList() {
-		if each, err := net.Listen(addr.Network(), addr.String()); err != nil {
-			return nil, err
-		} else {
-			listeners = append(listeners, each)
+func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
+	for _, addr := range addrs {
+		if addr == nil {
+			continue
 		}
-	}
-
-	if len(listeners) < 1 {
-		if each, err := net.Listen("tcp", ":http"); err != nil { //nolint
+		each, err := net.Listen((*addr).Network(), (*addr).String())
+		if err != nil {
 			return nil, err
-		} else {
-			listeners = append(listeners, each)
 		}
+		listeners = append(listeners, each)
 	}
 	return
 }
 
 func buildSrv() (srv *http.Server) {
-	srv.ReadTimeout = *httpReadTimeout.Duration()
-	srv.WriteTimeout = *httpWriteTimeout.Duration()
-	srv.IdleTimeout = *httpIdleTimeout.Duration()
+	srv.ReadTimeout = *flagHttpReadTimeout.Duration()
+	srv.WriteTimeout = *flagHttpWriteTimeout.Duration()
+	srv.IdleTimeout = *flagHttpIdleTimeout.Duration()
 	return
 }
 
-func handlerRedirect() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Connection", "close")
-		http.Redirect(w, req, *redirectTarget.String()+req.URL.String(), http.StatusMovedPermanently)
-	})
-}
+func buildHandler() (h http.Handler) {
+	// these get built outside in
+	h = httputil.NewSingleHostReverseProxy(*flagProxyTarget.URL())
+	h = VerifySlackSignatureHandler(h, *flagSlackToken.String(), *flagSlackExpire.Duration())
 
-func handlerProxy() (h http.Handler) {
-	h = httputil.NewSingleHostReverseProxy(*proxyTarget.URL())
-	h = VerifySlackSignatureHandler(h, *slackToken.String(), *slackExpire.Duration())
-
-	if len(*httpAllowedMethods.String()) > 0 {
-		h = RestrictMethodHandler(h, *httpAllowedMethods.Strings()...)
+	if len(*flagHttpAllowedURIs.String()) > 0 {
+		h = RestrictMethodHandler(h, *flagHttpAllowedURIs.Strings()...)
 	}
-	if len(*httpAllowedURIs.String()) > 0 {
-		h = RestrictMethodHandler(h, *httpAllowedURIs.Strings()...)
+	if len(*flagHttpAllowedMethods.String()) > 0 {
+		h = RestrictMethodHandler(h, *flagHttpAllowedMethods.Strings()...)
 	}
-
-	if *httpMaxBytes.Int64() > 0 {
-		h = BodyLimitHandler(h, *httpMaxBytes.Int64())
+	if *flagHttpMaxBytes.Int64() > 0 {
+		h = BodyLimitHandler(h, *flagHttpMaxBytes.Int64())
+	}
+	if *flagTLSRedirect.Bool() {
+		h = handlerHttpsRedirect(h)
 	}
 	return
-}
-
-func httpProxySrv() *http.Server {
-	srv := buildSrv()
-	h := handlerProxy()
-	srv.Handler = h
-	return srv
 }
 
 func tlsConfig() *tls.Config {
@@ -154,6 +146,30 @@ func tlsConfig() *tls.Config {
 func main() {
 	kingpin.Parse()
 
+	listeners, err := openListeners(*flagListen.TCPList())
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	redirectSrv := buildSrv()
+	redirectSrv.Handler = buildHandler()
+
+	for _, listen := range listeners {
+		redirectSrv.Serve(listen)
+		redirectSrv.ServeTLS(listen, "", "")
+	}
+
+}
+
+func handlerHttpsRedirect(child http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Scheme != "https" {
+			w.Header().Set("Connection", "close")
+			target := req
+			target.URL.Scheme = "https"
+			http.Redirect(w, req, target.URL.String(), http.StatusMovedPermanently)
+		}
+	})
 }
 
 func RestrictMethodHandler(child http.Handler, methods ...string) http.Handler {
