@@ -117,7 +117,7 @@ func buildHandler() (h http.Handler) {
 }
 
 func tlsConfig() *tls.Config {
-	return &tls.Config{
+	config := &tls.Config{
 		// Causes servers to use Go's default ciphersuite preferences,
 		// which are tuned to avoid attacks. Does nothing on clients.
 		PreferServerCipherSuites: true,
@@ -141,6 +141,7 @@ func tlsConfig() *tls.Config {
 			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
 		},
 	}
+	return config
 }
 
 func main() {
