@@ -157,9 +157,9 @@ func main() {
 
 	for _, listen := range listeners {
 		redirectSrv.Serve(listen)
-		redirectSrv.ServeTLS(listen, "", "")
+		// disabled until i get a bit more support in there?
+		// redirectSrv.ServeTLS(listen, "", "")
 	}
-
 }
 
 func handlerHttpsRedirect(child http.Handler) http.Handler {
