@@ -108,23 +108,6 @@ func buildSrv() (srv http.Server) {
 	return
 }
 
-func buildHandler() (h http.Handler) {
-	// these get built outside in
-	h = httputil.NewSingleHostReverseProxy(*flagProxyTarget)
-	h = VerifySlackSignatureHandler(h, *flagSlackToken, *flagSlackExpire)
-
-	if *flagHttpAllowedURIsSetByUser {
-		h = RestrictMethodHandler(h, *flagHttpAllowedURIs...)
-	}
-	if *flagHttpAllowedMethodsSetByUser {
-		h = RestrictMethodHandler(h, *flagHttpAllowedMethods...)
-	}
-	if *flagHttpMaxBodyBytes > 0 {
-		h = BodyLimitHandler(h, int64(*flagHttpMaxBodyBytes))
-	}
-	return
-}
-
 func tlsConfig() *tls.Config {
 	config := &tls.Config{
 		// Causes servers to use Go's default ciphersuite preferences,
@@ -151,6 +134,23 @@ func tlsConfig() *tls.Config {
 		},
 	}
 	return config
+}
+
+func buildHandler() (h http.Handler) {
+	// these get built outside in
+	h = httputil.NewSingleHostReverseProxy(*flagProxyTarget)
+	h = VerifySlackSignatureHandler(h, *flagSlackToken, *flagSlackExpire)
+
+	if *flagHttpAllowedURIsSetByUser {
+		h = RestrictMethodHandler(h, *flagHttpAllowedURIs...)
+	}
+	if *flagHttpAllowedMethodsSetByUser {
+		h = RestrictMethodHandler(h, *flagHttpAllowedMethods...)
+	}
+	if *flagHttpMaxBodyBytes > 0 {
+		h = BodyLimitHandler(h, int64(*flagHttpMaxBodyBytes))
+	}
+	return
 }
 
 func main() {

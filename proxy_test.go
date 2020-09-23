@@ -41,6 +41,10 @@ func TestBuildSrv(t *testing.T) {
 	_ = buildSrv()
 }
 
+func TestTLSConfig(t *testing.T) {
+	_ = tlsConfig()
+}
+
 func TestStatusHandler(t *testing.T) {
 	for body, statusCode := range testdataStatusHandler {
 		t.Run(body, func(t *testing.T) {
