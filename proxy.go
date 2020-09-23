@@ -41,9 +41,12 @@ var (
 	flagHttpAllowedURIs = kingpin.
 				Flag("uri", "uris to accept").
 				Envar("HTTP_URI")
-	flagHttpMaxBytes = kingpin.
-				Flag("read-limit", "max bytes to accept in body request").
-				Envar("HTTP_READ_LIMIT").Default("4mb")
+	flagHttpMaxHeaderBytes = kingpin.
+				Flag("header-limit", "max bytes to accept in body request").
+				Envar("HTTP_HEADER_LIMIT").Default("4m")
+	flagHttpMaxBodyBytes = kingpin.
+				Flag("body-limit", "max bytes to accept in body request").
+				Envar("HTTP_BODY_LIMIT").Default("4m")
 
 	// server timeouts
 	flagHttpReadTimeout = kingpin.
@@ -93,6 +96,7 @@ func buildSrv() (srv *http.Server) {
 	srv.ReadTimeout = *flagHttpReadTimeout.Duration()
 	srv.WriteTimeout = *flagHttpWriteTimeout.Duration()
 	srv.IdleTimeout = *flagHttpIdleTimeout.Duration()
+	srv.MaxHeaderBytes = *flagHttpMaxHeaderBytes.Int()
 	return
 }
 
@@ -107,11 +111,11 @@ func buildHandler() (h http.Handler) {
 	if len(*flagHttpAllowedMethods.String()) > 0 {
 		h = RestrictMethodHandler(h, *flagHttpAllowedMethods.Strings()...)
 	}
-	if *flagHttpMaxBytes.Int64() > 0 {
-		h = BodyLimitHandler(h, *flagHttpMaxBytes.Int64())
+	if *flagHttpMaxBodyBytes.Int64() > 0 {
+		h = BodyLimitHandler(h, *flagHttpMaxBodyBytes.Int64())
 	}
 	if *flagTLSRedirect.Bool() {
-		h = handlerHttpsRedirect(h)
+		h = HttpsRedirectHandler(h)
 	}
 	return
 }
@@ -162,8 +166,9 @@ func main() {
 	}
 }
 
-func handlerHttpsRedirect(child http.Handler) http.Handler {
+func HttpsRedirectHandler(child http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		log.Println(req.URL)
 		if req.URL.Scheme != "https" {
 			w.Header().Set("Connection", "close")
 			target := req

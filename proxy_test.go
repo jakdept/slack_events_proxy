@@ -2,6 +2,7 @@ package main
 
 import (
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,6 +43,40 @@ func TestStatusHandler(t *testing.T) {
 			assert.Equal(t, body+"\n", string(respBytes))
 		})
 	}
+}
+
+func TestHttpsRedirectHandler(t *testing.T) {
+	srv := httptest.NewServer(HttpsRedirectHandler(
+		StatusHandler(http.StatusNoContent, "")))
+	defer srv.Close()
+
+	c := srv.Client()
+	c.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusMovedPermanently, resp.StatusCode)
+}
+
+func TestHttpsRedirectHandlerNoModify(t *testing.T) {
+	srv := httptest.NewTLSServer(HttpsRedirectHandler(
+		StatusHandler(http.StatusNoContent, "")))
+	defer srv.Close()
+
+	c := srv.Client()
+	c.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+
+	log.Println(srv.URL)
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	resp, err := c.Do(req)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
 func TestResetrictMethodHandler(t *testing.T) {
