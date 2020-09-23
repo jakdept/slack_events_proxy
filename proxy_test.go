@@ -2,7 +2,6 @@ package main
 
 import (
 	"io/ioutil"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,19 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func StatusHandler(statusCode int, status string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Body != nil {
-			_, err := ioutil.ReadAll(r.Body)
-			if err != nil {
-				http.Error(w, "could not read body", http.StatusBadRequest)
-				return
-			}
-		}
-		http.Error(w, status, statusCode)
-	})
-}
 
 func TestStatusHandler(t *testing.T) {
 	for body, statusCode := range testdataStatusHandler {
@@ -43,40 +29,6 @@ func TestStatusHandler(t *testing.T) {
 			assert.Equal(t, body+"\n", string(respBytes))
 		})
 	}
-}
-
-func TestHttpsRedirectHandler(t *testing.T) {
-	srv := httptest.NewServer(HttpsRedirectHandler(
-		StatusHandler(http.StatusNoContent, "")))
-	defer srv.Close()
-
-	c := srv.Client()
-	c.CheckRedirect = func(r *http.Request, via []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
-	require.NoError(t, err)
-	resp, err := c.Do(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusMovedPermanently, resp.StatusCode)
-}
-
-func TestHttpsRedirectHandlerNoModify(t *testing.T) {
-	srv := httptest.NewTLSServer(HttpsRedirectHandler(
-		StatusHandler(http.StatusNoContent, "")))
-	defer srv.Close()
-
-	c := srv.Client()
-	c.CheckRedirect = func(r *http.Request, via []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-
-	log.Println(srv.URL)
-	req, err := http.NewRequest(http.MethodGet, srv.URL, nil)
-	require.NoError(t, err)
-	resp, err := c.Do(req)
-	require.NoError(t, err)
-	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 }
 
 func TestResetrictMethodHandler(t *testing.T) {

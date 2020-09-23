@@ -166,15 +166,16 @@ func main() {
 	}
 }
 
-func HttpsRedirectHandler(child http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		log.Println(req.URL)
-		if req.URL.Scheme != "https" {
-			w.Header().Set("Connection", "close")
-			target := req
-			target.URL.Scheme = "https"
-			http.Redirect(w, req, target.URL.String(), http.StatusMovedPermanently)
+func StatusHandler(statusCode int, status string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			_, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "could not read body", http.StatusBadRequest)
+				return
+			}
 		}
+		http.Error(w, status, statusCode)
 	})
 }
 
