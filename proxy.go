@@ -26,47 +26,55 @@ var (
 	// required restrictions
 	flagProxyTarget = kingpin.
 			Flag("proxy-host", "proxy host for requests").
-			Required()
+			Required().URL()
 	flagSlackToken = kingpin.
 			Flag("slack-token", "slack verification token").
-			Envar("SLACK_TOKEN").Required()
+			Envar("SLACK_TOKEN").Required().String()
 	flagSlackExpire = kingpin.
 			Flag("slack-expire", "max age of slack timestamp").
-			Envar("SLACK_EXPIRE").Default("30s")
+			Envar("SLACK_EXPIRE").Default("30s").Duration()
 
 	// handler restrictions
-	flagHttpAllowedMethods = kingpin.
-				Flag("method", "methods to accept").
-				Envar("HTTP_METHOD").Default(http.MethodPost)
-	flagHttpAllowedURIs = kingpin.
-				Flag("uri", "uris to accept").
-				Envar("HTTP_URI")
-	flagHttpMaxHeaderBytes = kingpin.
-				Flag("header-limit", "max bytes to accept in body request").
-				Envar("HTTP_HEADER_LIMIT").Default("4m")
-	flagHttpMaxBodyBytes = kingpin.
-				Flag("body-limit", "max bytes to accept in body request").
-				Envar("HTTP_BODY_LIMIT").Default("4m")
+	flagHttpAllowedMethodsSetByUser *bool
+	flagHttpAllowedMethods          = kingpin.
+					Flag("method", "methods to accept").
+					Envar("HTTP_METHOD").Default(http.MethodPost).
+					IsSetByUser(flagHttpAllowedMethodsSetByUser).
+					Strings()
+	flagHttpAllowedURIsSetByUser *bool
+	flagHttpAllowedURIs          = kingpin.
+					Flag("uri", "uris to accept").
+					IsSetByUser(flagHttpAllowedURIsSetByUser).
+					Envar("HTTP_URI").Strings()
+	flagHttpMaxBodyBytesSetByUser *bool
+	flagHttpMaxBodyBytes          = kingpin.
+					Flag("body-limit", "max bytes to accept in body request").
+					IsSetByUser(flagHttpMaxBodyBytesSetByUser).
+					Envar("HTTP_BODY_LIMIT").Default("4MB").Bytes()
 
 	// server timeouts
+	flagHttpMaxHeaderBytes = kingpin.
+				Flag("header-limit", "max bytes to accept in body request").
+				Envar("HTTP_HEADER_LIMIT").Default("4MB").Bytes()
 	flagHttpReadTimeout = kingpin.
 				Flag("read-timeout", "http timeout").
-				Envar("HTTP_READ_TIMEOUT").Default("10s")
+				Envar("HTTP_READ_TIMEOUT").Default("10s").Duration()
 	flagHttpWriteTimeout = kingpin.
 				Flag("write-timeout", "http timeout").
-				Envar("HTTP_WRITE_TIMEOUT").Default("10s")
+				Envar("HTTP_WRITE_TIMEOUT").Default("10s").Duration()
 	flagHttpIdleTimeout = kingpin.
 				Flag("idle-timeout", "http timeout (keepalive)").
-				Envar("HTTP_IDLE_TIMEOUT").Default("120s")
+				Envar("HTTP_IDLE_TIMEOUT").Default("120s").Duration()
 
 	flagListen = kingpin.
 			Flag("listen", "listen address both servers (multiple allowed)").
-			Envar("LISTEN").Required()
+			Envar("LISTEN").Required().TCPList()
 	flagMutualTLS = kingpin.
-			Flag("mtls", "enable mtls on https-listen").Default("false")
+			Flag("mtls", "enable mtls on https-listen").
+			Default("false").Bool()
 	flagTLSRedirect = kingpin.
 			Flag("redirect-target", "target for http -> https redirect").
-			Default("true")
+			Default("true").Bool()
 	flagTLSCert = kingpin.
 			Flag("tlsCert", "path to tls cert for https server").
 			ExistingFile()
@@ -75,7 +83,7 @@ var (
 			ExistingFile()
 	flagAutocert = kingpin.
 			Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
-			Default("false")
+			Default("false").Bool()
 )
 
 func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
@@ -92,27 +100,27 @@ func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
 	return
 }
 
-func buildSrv() (srv *http.Server) {
-	srv.ReadTimeout = *flagHttpReadTimeout.Duration()
-	srv.WriteTimeout = *flagHttpWriteTimeout.Duration()
-	srv.IdleTimeout = *flagHttpIdleTimeout.Duration()
-	srv.MaxHeaderBytes = *flagHttpMaxHeaderBytes.Int()
+func buildSrv() (srv http.Server) {
+	srv.ReadTimeout = *flagHttpReadTimeout
+	srv.WriteTimeout = *flagHttpWriteTimeout
+	srv.IdleTimeout = *flagHttpIdleTimeout
+	srv.MaxHeaderBytes = int(*flagHttpMaxHeaderBytes)
 	return
 }
 
 func buildHandler() (h http.Handler) {
 	// these get built outside in
-	h = httputil.NewSingleHostReverseProxy(*flagProxyTarget.URL())
-	h = VerifySlackSignatureHandler(h, *flagSlackToken.String(), *flagSlackExpire.Duration())
+	h = httputil.NewSingleHostReverseProxy(*flagProxyTarget)
+	h = VerifySlackSignatureHandler(h, *flagSlackToken, *flagSlackExpire)
 
-	if len(*flagHttpAllowedURIs.String()) > 0 {
-		h = RestrictMethodHandler(h, *flagHttpAllowedURIs.Strings()...)
+	if *flagHttpAllowedURIsSetByUser {
+		h = RestrictMethodHandler(h, *flagHttpAllowedURIs...)
 	}
-	if len(*flagHttpAllowedMethods.String()) > 0 {
-		h = RestrictMethodHandler(h, *flagHttpAllowedMethods.Strings()...)
+	if *flagHttpAllowedMethodsSetByUser {
+		h = RestrictMethodHandler(h, *flagHttpAllowedMethods...)
 	}
-	if *flagHttpMaxBodyBytes.Int64() > 0 {
-		h = BodyLimitHandler(h, *flagHttpMaxBodyBytes.Int64())
+	if *flagHttpMaxBodyBytes > 0 {
+		h = BodyLimitHandler(h, int64(*flagHttpMaxBodyBytes))
 	}
 	return
 }
@@ -148,7 +156,7 @@ func tlsConfig() *tls.Config {
 func main() {
 	kingpin.Parse()
 
-	listeners, err := openListeners(*flagListen.TCPList())
+	listeners, err := openListeners(*flagListen)
 	if err != nil {
 		log.Fatal(err)
 	}

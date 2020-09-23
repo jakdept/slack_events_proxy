@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/alecthomas/units"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,6 +31,14 @@ func TestOpenListeners(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildSrv(t *testing.T) {
+	*flagHttpReadTimeout = time.Second
+	*flagHttpWriteTimeout = time.Second
+	*flagHttpIdleTimeout = time.Second
+	*flagHttpMaxHeaderBytes = units.Base2Bytes(10)
+	_ = buildSrv()
 }
 
 func TestStatusHandler(t *testing.T) {
