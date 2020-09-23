@@ -114,9 +114,6 @@ func buildHandler() (h http.Handler) {
 	if *flagHttpMaxBodyBytes.Int64() > 0 {
 		h = BodyLimitHandler(h, *flagHttpMaxBodyBytes.Int64())
 	}
-	if *flagTLSRedirect.Bool() {
-		h = HttpsRedirectHandler(h)
-	}
 	return
 }
 
