@@ -1,9 +1,42 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"time"
 )
+
+var testdataOpenListeners = map[string]struct {
+	in  []*net.TCPAddr
+	out []string //listener.Addr.String()
+	err string
+}{
+	"normal": {
+		in: []*net.TCPAddr{
+			nil,
+			{IP: net.IPv4(127, 0, 0, 1), Port: 2345},
+			{IP: net.IPv4(127, 0, 0, 1), Port: 3456},
+		},
+		out: []string{
+			"127.0.0.1:2345",
+			"127.0.0.1:3456",
+		},
+	},
+	"restricted port": {
+		in: []*net.TCPAddr{
+			nil,
+			{IP: net.IPv4(127, 0, 0, 1), Port: 1},
+		},
+		err: "listen tcp 127.0.0.1:1: bind: permission denied",
+	},
+	"missing ip": {
+		in: []*net.TCPAddr{
+			nil,
+			{IP: net.IPv4(1, 1, 1, 1), Port: 4567},
+		},
+		err: "listen tcp 1.1.1.1:4567: bind: can't assign requested address",
+	},
+}
 
 var testdataStatusHandler = map[string]int{
 	"StatusOK":      http.StatusOK,

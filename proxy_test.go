@@ -11,6 +11,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestOpenListeners(t *testing.T) {
+	for name, td := range testdataOpenListeners {
+		t.Run(name, func(t *testing.T) {
+			td := td
+			out, err := openListeners(td.in)
+			if td.err == "" {
+				assert.NoError(t, err)
+			} else {
+				assert.EqualError(t, err, td.err)
+			}
+			require.Equal(t, len(td.out), len(out),
+				"expected %s listeners have %s", len(td.out), len(out))
+			for id := range out {
+				assert.Equal(t, td.out[id], out[id].Addr().String())
+				assert.NoError(t, out[id].Close())
+			}
+		})
+	}
+}
+
 func TestStatusHandler(t *testing.T) {
 	for body, statusCode := range testdataStatusHandler {
 		t.Run(body, func(t *testing.T) {
