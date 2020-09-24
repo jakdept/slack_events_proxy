@@ -38,6 +38,47 @@ var testdataOpenListeners = map[string]struct {
 	},
 }
 
+var testdataBuildHandler = map[string]struct {
+	allowedURI    []string
+	allowedMethod []string
+	maxBodyBytes  int64
+	expStatusCode int
+	Body          string
+}{
+	"bare": {
+		expStatusCode: http.StatusBadRequest,
+	},
+	"denied by URI": {
+		allowedURI:    []string{"/not-like-this"},
+		expStatusCode: http.StatusMethodNotAllowed,
+	},
+	"denied by method": {
+		allowedMethod: []string{http.MethodGet},
+		expStatusCode: http.StatusMethodNotAllowed,
+	},
+	"denied by body": {
+		maxBodyBytes: 16,
+		Body: `
+		badger badger badger badger
+		badger badger badger badger
+		badger badger badger badger
+		mushroom mushroom
+		badger badger badger badger
+		badger badger badger badger
+		badger badger badger badger
+		mushroom mushroom
+		badger badger badger badger
+		badger badger badger badger
+		badger badger badger badger
+		snaaaake
+		snaaaake
+		it isssss
+		a snaake
+		`,
+		expStatusCode: http.StatusRequestEntityTooLarge,
+	},
+}
+
 var testdataStatusHandler = map[string]int{
 	"StatusOK":      http.StatusOK,
 	"access denied": http.StatusUnauthorized,

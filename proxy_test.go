@@ -4,6 +4,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -43,6 +44,28 @@ func TestBuildSrv(t *testing.T) {
 
 func TestTLSConfig(t *testing.T) {
 	_ = tlsConfig()
+}
+
+func TestBuildHandler(t *testing.T) {
+	*flagProxyTarget = &url.URL{Scheme: "http", Host: "127.0.0.1:80"}
+	for name, tc := range testdataBuildHandler {
+		t.Run(name, func(t *testing.T) {
+			*flagHttpAllowedURIs = tc.allowedURI
+			flagHttpAllowedURIsSetByUser = new(bool)
+			*flagHttpAllowedURIsSetByUser = len(tc.allowedURI) > 0
+			*flagHttpAllowedMethods = tc.allowedMethod
+			flagHttpAllowedMethodsSetByUser = new(bool)
+			*flagHttpAllowedMethodsSetByUser = len(tc.allowedMethod) > 0
+			*flagHttpMaxBodyBytes = units.Base2Bytes(tc.maxBodyBytes)
+
+			tcSrv := httptest.NewServer(buildHandler())
+			defer tcSrv.Close()
+			resp, err := http.Post(tcSrv.URL, "", strings.NewReader(tc.Body))
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			assert.Equal(t, tc.expStatusCode, resp.StatusCode)
+		})
+	}
 }
 
 func TestStatusHandler(t *testing.T) {
