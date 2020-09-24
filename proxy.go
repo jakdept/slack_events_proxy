@@ -51,6 +51,9 @@ var (
 					Flag("body-limit", "max bytes to accept in body request").
 					IsSetByUser(flagHttpMaxBodyBytesSetByUser).
 					Envar("HTTP_BODY_LIMIT").Default("4MB").Bytes()
+	flagMutualTLS = kingpin.
+			Flag("mtls", "enable mtls on https-listen").
+			Default("false").Bool()
 
 	// server timeouts
 	flagHttpMaxHeaderBytes = kingpin.
@@ -66,36 +69,53 @@ var (
 				Flag("idle-timeout", "http timeout (keepalive)").
 				Envar("HTTP_IDLE_TIMEOUT").Default("120s").Duration()
 
-	flagListen = kingpin.
-			Flag("listen", "listen address both servers (multiple allowed)").
-			Envar("LISTEN").Required().TCPList()
-	flagMutualTLS = kingpin.
-			Flag("mtls", "enable mtls on https-listen").
-			Default("false").Bool()
-	flagTLSRedirect = kingpin.
-			Flag("redirect-target", "target for http -> https redirect").
-			Default("true").Bool()
-	flagTLSCert = kingpin.
-			Flag("tlsCert", "path to tls cert for https server").
-			ExistingFile()
+	flagTLSSetByUser *bool
+	flagTLSCert      = kingpin.
+				Flag("tlsCert", "path to tls cert for https server").
+				IsSetByUser(flagTLSSetByUser).
+				ExistingFile()
 	flagTLSKey = kingpin.
 			Flag("tlsKey", "path to tls key for https server").
 			ExistingFile()
-	flagAutocert = kingpin.
-			Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
-			Default("false").Bool()
+	flagAutocertDomainsSetByUser *bool
+	flagAutocertDomains          = kingpin.
+					Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
+					IsSetByUser(flagAutocertDomainsSetByUser).
+					Default("false").Strings()
+	flagAutocertCacheDir = kingpin.
+				Flag("autocert-cachedir", "storage for ACME cert data").
+				Default("/secret").ExistingDir()
+	flagListen = kingpin.
+			Flag("listen", "listen address both servers (multiple allowed)").
+			Envar("LISTEN").Required().TCPList()
 )
+
+var autocertListener *net.Listener
 
 func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
 	for _, addr := range addrs {
 		if addr == nil {
 			continue
 		}
-		each, err := net.Listen((*addr).Network(), (*addr).String())
+		network := addr.Network()
+		address := addr.String()
+
+		if *flagAutocertDomainsSetByUser {
+			if autocertListener != nil {
+				// skip if there's already a global listener on 80
+				continue
+			} else if addr.Port == 80 {
+				address = ":http"
+			}
+		}
+		each, err := net.Listen(network, address)
 		if err != nil {
 			return nil, err
 		}
 		listeners = append(listeners, each)
+		if *flagAutocertDomainsSetByUser && addr.Port == 80 {
+			autocertListener = &each
+		}
 	}
 	return
 }
@@ -108,7 +128,12 @@ func buildSrv() (srv http.Server) {
 	return
 }
 
-func tlsConfig() *tls.Config {
+func tlsConfig() (cfg *tls.Config, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			cfg, err = nil, errors.New("invalid TLS configuration")
+		}
+	}()
 	config := &tls.Config{
 		// Causes servers to use Go's default ciphersuite preferences,
 		// which are tuned to avoid attacks. Does nothing on clients.
@@ -133,7 +158,21 @@ func tlsConfig() *tls.Config {
 			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
 		},
 	}
-	return config
+	switch {
+	case *flagTLSSetByUser:
+		cert, err := tls.LoadX509KeyPair(*flagTLSCert, *flagTLSKey)
+		if err != nil {
+			return nil, err
+		}
+		config.Certificates = []tls.Certificate{cert}
+	case *flagAutocertDomainsSetByUser:
+		go func() {
+
+		}()
+	default:
+		panic("no TLS cert specified")
+	}
+	return config, nil
 }
 
 func buildHandler() (h http.Handler) {

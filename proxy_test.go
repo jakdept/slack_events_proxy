@@ -15,6 +15,7 @@ import (
 )
 
 func TestOpenListeners(t *testing.T) {
+	flagAutocertDomainsSetByUser = new(bool)
 	for name, td := range testdataOpenListeners {
 		t.Run(name, func(t *testing.T) {
 			td := td
@@ -43,7 +44,8 @@ func TestBuildSrv(t *testing.T) {
 }
 
 func TestTLSConfig(t *testing.T) {
-	_ = tlsConfig()
+	//todo
+	_, _ = tlsConfig()
 }
 
 func TestBuildHandler(t *testing.T) {
