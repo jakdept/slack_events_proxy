@@ -47,6 +47,7 @@ func TestTLSConfig(t *testing.T) {
 }
 
 func TestBuildHandler(t *testing.T) {
+	// backend target doesn't matter, it never gets there
 	*flagProxyTarget = &url.URL{Scheme: "http", Host: "127.0.0.1:80"}
 	for name, tc := range testdataBuildHandler {
 		t.Run(name, func(t *testing.T) {
