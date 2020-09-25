@@ -21,8 +21,6 @@ import (
 	"golang.org/x/crypto/acme/autocert"
 )
 
-var httpAllowedMethodsSet, httpAllowedURIsSet *bool
-
 var (
 	// required restrictions
 	flagProxyTarget = kingpin.
@@ -47,57 +45,61 @@ var (
 					Flag("uri", "uris to accept").
 					IsSetByUser(flagHttpAllowedURIsSetByUser).
 					Envar("HTTP_URI").Strings()
-	flagHttpMaxBodyBytesSetByUser *bool
-	flagHttpMaxBodyBytes          = kingpin.
-					Flag("body-limit", "max bytes to accept in body request").
-					IsSetByUser(flagHttpMaxBodyBytesSetByUser).
-					Envar("HTTP_BODY_LIMIT").Default("4MB").Bytes()
-	flagMutualTLS = kingpin.
-			Flag("mtls", "enable mtls on https-listen").
-			Default("false").Bool()
+	// flagHttpMaxBodyBytesSetByUser *bool
+	// flagHttpMaxBodyBytes          = kingpin.
+	// 				Flag("body-limit", "max bytes to accept in body request").
+	// 				IsSetByUser(flagHttpMaxBodyBytesSetByUser).
+	// 				Envar("HTTP_BODY_LIMIT").Default("4MB").Bytes()
+	// 				// not possible - k8s terminated TLS connections
+	// flagMutualTLS = kingpin.
+	// 		Flag("mtls", "enable mtls on https-listen").
+	// 		Default("false").Bool()
 
-	// server timeouts
-	flagHttpMaxHeaderBytes = kingpin.
-				Flag("header-limit", "max bytes to accept in body request").
-				Envar("HTTP_HEADER_LIMIT").Default("4MB").Bytes()
-	flagHttpReadTimeout = kingpin.
-				Flag("read-timeout", "http timeout").
-				Envar("HTTP_READ_TIMEOUT").Default("10s").Duration()
-	flagHttpWriteTimeout = kingpin.
-				Flag("write-timeout", "http timeout").
-				Envar("HTTP_WRITE_TIMEOUT").Default("10s").Duration()
-	flagHttpIdleTimeout = kingpin.
-				Flag("idle-timeout", "http timeout (keepalive)").
-				Envar("HTTP_IDLE_TIMEOUT").Default("120s").Duration()
+	// server timeouts - no longer implemented
+	// flagHttpMaxHeaderBytes = kingpin.
+	// 			Flag("header-limit", "max bytes to accept in body request").
+	// 			Envar("HTTP_HEADER_LIMIT").Default("4MB").Bytes()
+	// flagHttpReadTimeout = kingpin.
+	// 			Flag("read-timeout", "http timeout").
+	// 			Envar("HTTP_READ_TIMEOUT").Default("10s").Duration()
+	// flagHttpWriteTimeout = kingpin.
+	// 			Flag("write-timeout", "http timeout").
+	// 			Envar("HTTP_WRITE_TIMEOUT").Default("10s").Duration()
+	// flagHttpIdleTimeout = kingpin.
+	// 			Flag("idle-timeout", "http timeout (keepalive)").
+	// 			Envar("HTTP_IDLE_TIMEOUT").Default("120s").Duration()
 
-	flagTLSSetByUser *bool
-	flagTLSCert      = kingpin.
-				Flag("tlsCert", "path to tls cert for https server").
-				IsSetByUser(flagTLSSetByUser).
-				ExistingFile()
-	flagTLSKey = kingpin.
-			Flag("tlsKey", "path to tls key for https server").
-			ExistingFile()
-	flagHttpRedirectTargetSetByUser *bool
-	flagHttpRedirectTarget          = kingpin.
-					Flag("http-redirect-target", "target for http redirect on port 80\n(enabled automatically to 443 on first IP w/ autocert)\n(fallback to first listen)").
-					IsSetByUser(flagHttpRedirectTargetSetByUser).String()
-	flagAutocertDomainsSetByUser *bool
-	flagAutocertDomains          = kingpin.
-					Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
-					IsSetByUser(flagAutocertDomainsSetByUser).
-					Default("false").Strings()
-	flagAutocertCacheDir = kingpin.
-				Flag("autocert-cachedir", "storage for ACME cert data").
-				Default("/secret").ExistingDir()
-	flagListen = kingpin.
-			Flag("listen", "listen addresses for server (multiple allowed)").
-			Envar("LISTEN").Required().TCPList()
+	// no longer used
+	// flagTLSSetByUser *bool
+	// flagTLSCert      = kingpin.
+	// 			Flag("tlsCert", "path to tls cert for https server").
+	// 			IsSetByUser(flagTLSSetByUser).
+	// 			ExistingFile()
+	// flagTLSKey = kingpin.
+	// 		Flag("tlsKey", "path to tls key for https server").
+	// 		ExistingFile()
+	// flagHttpRedirectTargetSetByUser *bool
+	// flagHttpRedirectTarget          = kingpin.
+	// 				Flag("http-redirect-target", "target for http redirect on port 80\n(enabled automatically to 443 on first IP w/ autocert)\n(fallback to first listen)").
+	// 				IsSetByUser(flagHttpRedirectTargetSetByUser).String()
+	// flagAutocertDomainsSetByUser *bool
+	// flagAutocertDomains          = kingpin.
+	// 				Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
+	// 				IsSetByUser(flagAutocertDomainsSetByUser).
+	// 				Default("false").Strings()
+	// flagAutocertCacheDir = kingpin.
+	// 			Flag("autocert-cachedir", "storage for ACME cert data").
+	// 			Default("/secret").ExistingDir()
+	// flagListen = kingpin.
+	// 		Flag("listen", "listen addresses for server (multiple allowed)").
+	// 		Envar("LISTEN").Required().TCPList()
 )
 
+// deadcode
 var httpListener *net.Listener
 var redirectSrv *http.Server
 
+// deadcode
 func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
 	for _, addr := range addrs {
 		if addr == nil {
@@ -126,6 +128,7 @@ func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
 	return
 }
 
+// deadcode
 func buildSrv() (srv http.Server) {
 	srv.ReadTimeout = *flagHttpReadTimeout
 	srv.WriteTimeout = *flagHttpWriteTimeout
@@ -134,6 +137,7 @@ func buildSrv() (srv http.Server) {
 	return
 }
 
+// deadcode
 func tlsConfig() (cfg *tls.Config, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -221,19 +225,7 @@ func buildHandler() (h http.Handler) {
 func main() {
 	kingpin.Parse()
 
-	listeners, err := openListeners(*flagListen)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	redirectSrv := buildSrv()
-	redirectSrv.Handler = buildHandler()
-
-	for _, listen := range listeners {
-		redirectSrv.Serve(listen)
-		// disabled until i get a bit more support in there?
-		// redirectSrv.ServeTLS(listen, "", "")
-	}
+	log.Fatal(http.ListenAndServe(":http", buildHandler()))
 }
 
 func StatusHandler(statusCode int, status string) http.Handler {
