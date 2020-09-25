@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -18,7 +16,6 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin"
-	"golang.org/x/crypto/acme/autocert"
 )
 
 var (
@@ -45,165 +42,7 @@ var (
 					Flag("uri", "uris to accept").
 					IsSetByUser(flagHttpAllowedURIsSetByUser).
 					Envar("HTTP_URI").Strings()
-	// flagHttpMaxBodyBytesSetByUser *bool
-	// flagHttpMaxBodyBytes          = kingpin.
-	// 				Flag("body-limit", "max bytes to accept in body request").
-	// 				IsSetByUser(flagHttpMaxBodyBytesSetByUser).
-	// 				Envar("HTTP_BODY_LIMIT").Default("4MB").Bytes()
-	// 				// not possible - k8s terminated TLS connections
-	// flagMutualTLS = kingpin.
-	// 		Flag("mtls", "enable mtls on https-listen").
-	// 		Default("false").Bool()
-
-	// server timeouts - no longer implemented
-	// flagHttpMaxHeaderBytes = kingpin.
-	// 			Flag("header-limit", "max bytes to accept in body request").
-	// 			Envar("HTTP_HEADER_LIMIT").Default("4MB").Bytes()
-	// flagHttpReadTimeout = kingpin.
-	// 			Flag("read-timeout", "http timeout").
-	// 			Envar("HTTP_READ_TIMEOUT").Default("10s").Duration()
-	// flagHttpWriteTimeout = kingpin.
-	// 			Flag("write-timeout", "http timeout").
-	// 			Envar("HTTP_WRITE_TIMEOUT").Default("10s").Duration()
-	// flagHttpIdleTimeout = kingpin.
-	// 			Flag("idle-timeout", "http timeout (keepalive)").
-	// 			Envar("HTTP_IDLE_TIMEOUT").Default("120s").Duration()
-
-	// no longer used
-	// flagTLSSetByUser *bool
-	// flagTLSCert      = kingpin.
-	// 			Flag("tlsCert", "path to tls cert for https server").
-	// 			IsSetByUser(flagTLSSetByUser).
-	// 			ExistingFile()
-	// flagTLSKey = kingpin.
-	// 		Flag("tlsKey", "path to tls key for https server").
-	// 		ExistingFile()
-	// flagHttpRedirectTargetSetByUser *bool
-	// flagHttpRedirectTarget          = kingpin.
-	// 				Flag("http-redirect-target", "target for http redirect on port 80\n(enabled automatically to 443 on first IP w/ autocert)\n(fallback to first listen)").
-	// 				IsSetByUser(flagHttpRedirectTargetSetByUser).String()
-	// flagAutocertDomainsSetByUser *bool
-	// flagAutocertDomains          = kingpin.
-	// 				Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
-	// 				IsSetByUser(flagAutocertDomainsSetByUser).
-	// 				Default("false").Strings()
-	// flagAutocertCacheDir = kingpin.
-	// 			Flag("autocert-cachedir", "storage for ACME cert data").
-	// 			Default("/secret").ExistingDir()
-	// flagListen = kingpin.
-	// 		Flag("listen", "listen addresses for server (multiple allowed)").
-	// 		Envar("LISTEN").Required().TCPList()
 )
-
-// deadcode
-var httpListener *net.Listener
-var redirectSrv *http.Server
-
-// deadcode
-func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
-	for _, addr := range addrs {
-		if addr == nil {
-			continue
-		}
-		network := addr.Network()
-		address := addr.String()
-
-		if *flagAutocertDomainsSetByUser {
-			if httpListener != nil {
-				// skip if there's already a global listener on 80
-				continue
-			} else if addr.Port == 80 {
-				address = ":http"
-			}
-		}
-		each, err := net.Listen(network, address)
-		if err != nil {
-			return nil, err
-		}
-		listeners = append(listeners, each)
-		if *flagAutocertDomainsSetByUser && addr.Port == 80 {
-			httpListener = &each
-		}
-	}
-	return
-}
-
-// deadcode
-func buildSrv() (srv http.Server) {
-	srv.ReadTimeout = *flagHttpReadTimeout
-	srv.WriteTimeout = *flagHttpWriteTimeout
-	srv.IdleTimeout = *flagHttpIdleTimeout
-	srv.MaxHeaderBytes = int(*flagHttpMaxHeaderBytes)
-	return
-}
-
-// deadcode
-func tlsConfig() (cfg *tls.Config, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			cfg, err = nil, fmt.Errorf("invalid TLS configuration - %v", r)
-		}
-	}()
-	config := &tls.Config{
-		// Causes servers to use Go's default ciphersuite preferences,
-		// which are tuned to avoid attacks. Does nothing on clients.
-		PreferServerCipherSuites: true,
-		// Only use curves which have assembly implementations
-		CurvePreferences: []tls.CurveID{
-			tls.CurveP256,
-			tls.X25519, // Go 1.8 only
-		},
-		MinVersion: tls.VersionTLS13,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305, // Go 1.8 only
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,   // Go 1.8 only
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-
-			// Best disabled, as they don't provide Forward Secrecy,
-			// but might be necessary for some clients
-			// tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-		},
-	}
-	var httpRedirectHandler http.Handler
-	if *flagHttpRedirectTargetSetByUser {
-		httpRedirectHandler = http.RedirectHandler(*flagHttpRedirectTarget, 301)
-	} else if len(*flagListen) > 1 {
-		httpRedirectHandler = http.RedirectHandler(
-			"https://"+(*flagListen)[0].String(),
-			http.StatusMovedPermanently,
-		)
-	} else {
-		// should be impossible to get here
-		log.Fatalln("cannot find redirect target for server")
-	}
-
-	switch {
-	case *flagTLSSetByUser:
-		cert, err := tls.LoadX509KeyPair(*flagTLSCert, *flagTLSKey)
-		if err != nil {
-			return nil, err
-		}
-		config.Certificates = []tls.Certificate{cert}
-	case *flagAutocertDomainsSetByUser:
-		mgr := &autocert.Manager{
-			Cache:      autocert.DirCache("secret-dir"),
-			Prompt:     autocert.AcceptTOS,
-			HostPolicy: autocert.HostWhitelist(*flagAutocertDomains...),
-		}
-		config.GetCertificate = mgr.GetCertificate
-		// wrap the redirect handler
-		httpRedirectHandler = mgr.HTTPHandler(httpRedirectHandler)
-	default:
-		log.Fatalln("no TLS cert specified")
-	}
-	go func() {
-	}()
-	return config, nil
-}
 
 func buildHandler() (h http.Handler) {
 	// these get built outside in
@@ -215,9 +54,6 @@ func buildHandler() (h http.Handler) {
 	}
 	if *flagHttpAllowedMethodsSetByUser {
 		h = RestrictMethodHandler(h, *flagHttpAllowedMethods...)
-	}
-	if *flagHttpMaxBodyBytes > 0 {
-		h = BodyLimitHandler(h, int64(*flagHttpMaxBodyBytes))
 	}
 	return
 }
