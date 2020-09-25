@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kingpin"
+	"golang.org/x/crypto/acme/autocert"
 )
 
 var httpAllowedMethodsSet, httpAllowedURIsSet *bool
@@ -77,6 +78,9 @@ var (
 	flagTLSKey = kingpin.
 			Flag("tlsKey", "path to tls key for https server").
 			ExistingFile()
+	flagPort80Redirect = kingpin.
+				Flag("redirect-http", "http redirect on port 80 (enabled w/ autocert)").
+				Bool()
 	flagAutocertDomainsSetByUser *bool
 	flagAutocertDomains          = kingpin.
 					Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
@@ -90,7 +94,8 @@ var (
 			Envar("LISTEN").Required().TCPList()
 )
 
-var autocertListener *net.Listener
+var httpListener *net.Listener
+var redirectSrv *http.Server
 
 func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
 	for _, addr := range addrs {
@@ -101,7 +106,7 @@ func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
 		address := addr.String()
 
 		if *flagAutocertDomainsSetByUser {
-			if autocertListener != nil {
+			if httpListener != nil {
 				// skip if there's already a global listener on 80
 				continue
 			} else if addr.Port == 80 {
@@ -114,7 +119,7 @@ func openListeners(addrs []*net.TCPAddr) (listeners []net.Listener, err error) {
 		}
 		listeners = append(listeners, each)
 		if *flagAutocertDomainsSetByUser && addr.Port == 80 {
-			autocertListener = &each
+			httpListener = &each
 		}
 	}
 	return
@@ -131,7 +136,7 @@ func buildSrv() (srv http.Server) {
 func tlsConfig() (cfg *tls.Config, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			cfg, err = nil, errors.New("invalid TLS configuration")
+			cfg, err = nil, fmt.Errorf("invalid TLS configuration - %v", r)
 		}
 	}()
 	config := &tls.Config{
@@ -166,6 +171,13 @@ func tlsConfig() (cfg *tls.Config, err error) {
 		}
 		config.Certificates = []tls.Certificate{cert}
 	case *flagAutocertDomainsSetByUser:
+		mgr := &autocert.Manager{
+			Cache:      autocert.DirCache("secret-dir"),
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(*flagAutocertDomains...),
+		}
+		config.GetCertificate = mgr.GetCertificate
+		_ = mgr
 		go func() {
 
 		}()
