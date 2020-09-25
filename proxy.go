@@ -78,9 +78,10 @@ var (
 	flagTLSKey = kingpin.
 			Flag("tlsKey", "path to tls key for https server").
 			ExistingFile()
-	flagPort80Redirect = kingpin.
-				Flag("redirect-http", "http redirect on port 80 (enabled w/ autocert)").
-				Bool()
+	flagHttpRedirectTargetSetByUser *bool
+	flagHttpRedirectTarget          = kingpin.
+					Flag("http-redirect-target", "target for http redirect on port 80\n(enabled automatically to 443 on first IP w/ autocert)\n(fallback to first listen)").
+					IsSetByUser(flagHttpRedirectTargetSetByUser).String()
 	flagAutocertDomainsSetByUser *bool
 	flagAutocertDomains          = kingpin.
 					Flag("autocert", "use letsencrypt to automatically grab a TLS certificate").
@@ -90,7 +91,7 @@ var (
 				Flag("autocert-cachedir", "storage for ACME cert data").
 				Default("/secret").ExistingDir()
 	flagListen = kingpin.
-			Flag("listen", "listen address both servers (multiple allowed)").
+			Flag("listen", "listen addresses for server (multiple allowed)").
 			Envar("LISTEN").Required().TCPList()
 )
 
@@ -163,6 +164,19 @@ func tlsConfig() (cfg *tls.Config, err error) {
 			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
 		},
 	}
+	var httpRedirectHandler http.Handler
+	if *flagHttpRedirectTargetSetByUser {
+		httpRedirectHandler = http.RedirectHandler(*flagHttpRedirectTarget, 301)
+	} else if len(*flagListen) > 1 {
+		httpRedirectHandler = http.RedirectHandler(
+			"https://"+(*flagListen)[0].String(),
+			http.StatusMovedPermanently,
+		)
+	} else {
+		// should be impossible to get here
+		log.Fatalln("cannot find redirect target for server")
+	}
+
 	switch {
 	case *flagTLSSetByUser:
 		cert, err := tls.LoadX509KeyPair(*flagTLSCert, *flagTLSKey)
@@ -177,13 +191,13 @@ func tlsConfig() (cfg *tls.Config, err error) {
 			HostPolicy: autocert.HostWhitelist(*flagAutocertDomains...),
 		}
 		config.GetCertificate = mgr.GetCertificate
-		_ = mgr
-		go func() {
-
-		}()
+		// wrap the redirect handler
+		httpRedirectHandler = mgr.HTTPHandler(httpRedirectHandler)
 	default:
-		panic("no TLS cert specified")
+		log.Fatalln("no TLS cert specified")
 	}
+	go func() {
+	}()
 	return config, nil
 }
 
