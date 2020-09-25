@@ -7,46 +7,10 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/alecthomas/units"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestOpenListeners(t *testing.T) {
-	flagAutocertDomainsSetByUser = new(bool)
-	for name, td := range testdataOpenListeners {
-		t.Run(name, func(t *testing.T) {
-			td := td
-			out, err := openListeners(td.in)
-			if td.err == "" {
-				assert.NoError(t, err)
-			} else {
-				assert.EqualError(t, err, td.err)
-			}
-			require.Equal(t, len(td.out), len(out),
-				"expected %s listeners have %s", len(td.out), len(out))
-			for id := range out {
-				assert.Equal(t, td.out[id], out[id].Addr().String())
-				assert.NoError(t, out[id].Close())
-			}
-		})
-	}
-}
-
-func TestBuildSrv(t *testing.T) {
-	*flagHttpReadTimeout = time.Second
-	*flagHttpWriteTimeout = time.Second
-	*flagHttpIdleTimeout = time.Second
-	*flagHttpMaxHeaderBytes = units.Base2Bytes(10)
-	_ = buildSrv()
-}
-
-func TestTLSConfig(t *testing.T) {
-	//todo
-	_, _ = tlsConfig()
-}
 
 func TestBuildHandler(t *testing.T) {
 	// backend target doesn't matter, it never gets there
@@ -59,8 +23,6 @@ func TestBuildHandler(t *testing.T) {
 			*flagHttpAllowedMethods = tc.allowedMethod
 			flagHttpAllowedMethodsSetByUser = new(bool)
 			*flagHttpAllowedMethodsSetByUser = len(tc.allowedMethod) > 0
-			*flagHttpMaxBodyBytes = units.Base2Bytes(tc.maxBodyBytes)
-
 			tcSrv := httptest.NewServer(buildHandler())
 			defer tcSrv.Close()
 			resp, err := http.Post(tcSrv.URL, "", strings.NewReader(tc.Body))
